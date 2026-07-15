@@ -1,12 +1,89 @@
 import { NextAuthOptions } from "next-auth";
-import GithubProvider from "next-auth/providers/github"
+import CredentialsProvider from "next-auth/providers/credentials";
+import bcrypt from "bcryptjs";
 
-export const authOption:NextAuthOptions ={
-     providers: [
-    GithubProvider({
-      clientId: process.env.GITHUB_ID!,
-      clientSecret: process.env.GITHUB_SECRET!,
+import { connectToDatabase } from "./db";
+import User from "@/models/User";
+
+export const authOptions: NextAuthOptions = {
+
+
+  providers: [
+    CredentialsProvider({
+      name: "Credentials",
+
+      credentials: {
+        email: {
+          label: "Email",
+          type: "email",
+          placeholder: "Enter your email",
+        },
+
+        password: {
+          label: "Password",
+          type: "password",
+          placeholder: "Enter your password",
+        },
+      },
+
+      async authorize(credentials) {
+        if (!credentials?.email || !credentials?.password) {
+          throw new Error("Email and Password are required.");
+        }
+
+        await connectToDatabase();
+
+        const user = await User.findOne({
+          email: credentials.email,
+        }).select("+password");
+
+        if (!user) {
+          throw new Error("User not found.");
+        }
+
+        const isPasswordValid = await bcrypt.compare(
+          credentials.password,
+          user.password
+        );
+
+        if (!isPasswordValid) {
+          throw new Error("Invalid password.");
+        }
+
+        return {
+          id: user._id.toString(),
+          email: user.email,
+        };
+      },
     }),
-    // ...add more providers here
   ],
+
+  callbacks: {
+    async jwt({ token, user }) {
+      if (user) {
+        token.id = user.id;
+      }
+
+      return token;
+    },
+
+    async session({ session, token }) {
+      if (session.user) {
+        session.user.id = token.id as string;
+      }
+
+      return session;
+    },
+  },
+
+  pages: {
+    signIn: "/login",
+    error: "/login",
+  },
+  session: {
+    strategy: "jwt",
+    maxAge: 30 * 24 * 60 * 60,
+  },
+
+  secret: process.env.NEXTAUTH_SECRET,
 };
